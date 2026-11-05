@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+venv/
+.venv/
+env/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Generated gRPC (generated at build time inside Docker)
+coordinator/distributed_pb2.py
+coordinator/distributed_pb2_grpc.py
+worker/distributed_pb2.py
+worker/distributed_pb2_grpc.py
+
+# Environment
+.env
+*.env.local
+
+# Storage (don't commit uploaded files)
+storage/uploads/*
+storage/processed/*
+storage/thumbnails/*
+!storage/uploads/.gitkeep
+!storage/processed/.gitkeep
+!storage/thumbnails/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db

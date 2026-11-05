@@ -1,0 +1,192 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DistriFlow – Docker Compose
+#
+# Services:
+#   mongodb      – Persistent data store
+#   coordinator  – gRPC server; schedules tasks and monitors workers
+#   worker1      – Independent image processing worker (container 1)
+#   worker2      – Independent image processing worker (container 2)
+#   worker3      – Independent image processing worker (container 3)
+#   api          – FastAPI REST + WebSocket bridge
+#   frontend     – React dashboard (Nginx)
+#
+# Run:  docker compose up --build
+# Demo: docker compose stop worker2     → watch worker2 fail + tasks reassign
+#       docker compose start worker2    → watch worker2 rejoin
+# ─────────────────────────────────────────────────────────────────────────────
+
+networks:
+  distriflow-net:
+    driver: bridge
+
+volumes:
+  mongodb-data:
+  storage-data:
+
+services:
+
+  # ── MongoDB ────────────────────────────────────────────────────────────────
+  mongodb:
+    image: mongo:7
+    container_name: distriflow-mongodb
+    restart: unless-stopped
+    networks: [distriflow-net]
+    volumes:
+      - mongodb-data:/data/db
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Coordinator ────────────────────────────────────────────────────────────
+  coordinator:
+    build:
+      context: .
+      dockerfile: coordinator/Dockerfile
+    container_name: distriflow-coordinator
+    restart: unless-stopped
+    networks: [distriflow-net]
+    volumes:
+      - storage-data:/storage
+      - ./coordinator:/app
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      - COORDINATOR_PORT=50050
+      - MONGODB_URI=mongodb://mongodb:27017
+      - DB_NAME=distriflow
+      - STORAGE_PATH=/storage
+      - HEARTBEAT_TIMEOUT=30
+      - HEALTH_CHECK_INTERVAL=10
+      - SCHEDULE_INTERVAL=2
+      - MAX_TASKS_PER_WORKER=5
+    ports:
+      - "50050:50050"
+
+  # ── Worker 1 ───────────────────────────────────────────────────────────────
+  worker1:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    container_name: distriflow-worker1
+    hostname: worker1
+    restart: unless-stopped
+    networks: [distriflow-net]
+    volumes:
+      - storage-data:/storage
+      - ./worker:/app
+    depends_on:
+      - coordinator
+    environment:
+      - WORKER_ID=worker-1
+      - WORKER_PORT=50051
+      - GRPC_HOST=worker1
+      - COORDINATOR_HOST=coordinator
+      - COORDINATOR_PORT=50050
+      - MONGODB_URI=mongodb://mongodb:27017
+      - DB_NAME=distriflow
+      - STORAGE_PATH=/storage
+      - HEARTBEAT_INTERVAL=10
+    ports:
+      - "50051:50051"
+
+  # ── Worker 2 ───────────────────────────────────────────────────────────────
+  # To demo failure: docker compose stop worker2
+  # To recover:      docker compose start worker2
+  worker2:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    container_name: distriflow-worker2
+    hostname: worker2
+    restart: unless-stopped
+    networks: [distriflow-net]
+    volumes:
+      - storage-data:/storage
+      - ./worker:/app
+    depends_on:
+      - coordinator
+    environment:
+      - WORKER_ID=worker-2
+      - WORKER_PORT=50052
+      - GRPC_HOST=worker2
+      - COORDINATOR_HOST=coordinator
+      - COORDINATOR_PORT=50050
+      - MONGODB_URI=mongodb://mongodb:27017
+      - DB_NAME=distriflow
+      - STORAGE_PATH=/storage
+      - HEARTBEAT_INTERVAL=10
+    ports:
+      - "50052:50052"
+
+  # ── Worker 3 ───────────────────────────────────────────────────────────────
+  worker3:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    container_name: distriflow-worker3
+    hostname: worker3
+    restart: unless-stopped
+    networks: [distriflow-net]
+    volumes:
+      - storage-data:/storage
+      - ./worker:/app
+    depends_on:
+      - coordinator
+    environment:
+      - WORKER_ID=worker-3
+      - WORKER_PORT=50053
+      - GRPC_HOST=worker3
+      - COORDINATOR_HOST=coordinator
+      - COORDINATOR_PORT=50050
+      - MONGODB_URI=mongodb://mongodb:27017
+      - DB_NAME=distriflow
+      - STORAGE_PATH=/storage
+      - HEARTBEAT_INTERVAL=10
+    ports:
+      - "50053:50053"
+
+  # ── FastAPI ────────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    container_name: distriflow-api
+    restart: unless-stopped
+    networks: [distriflow-net]
+    volumes:
+      - storage-data:/storage
+      - ./api:/app
+      - ./coordinator:/coordinator
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      - MONGODB_URI=mongodb://mongodb:27017
+      - DB_NAME=distriflow
+      - STORAGE_PATH=/storage
+      - MAX_FILE_SIZE_MB=50
+      - CORS_ORIGINS=*
+    ports:
+      - "8000:8000"
+
+  # ── Frontend ───────────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: distriflow-frontend
+    restart: unless-stopped
+    networks: [distriflow-net]
+    volumes:
+      - ./frontend/dist:/usr/share/nginx/html
+    depends_on:
+      - api
+    ports:
+      - "3000:80"
